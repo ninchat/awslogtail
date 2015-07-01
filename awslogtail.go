@@ -115,7 +115,7 @@ func load(logService *cloudwatchlogs.CloudWatchLogs, initial chan<- string, foll
 
 	for _, e := range logEvents.Events {
 		if *e.Message != "" {
-			initial <- *e.Message
+			initial <- formatMessage(e)
 		}
 	}
 
@@ -140,11 +140,25 @@ func load(logService *cloudwatchlogs.CloudWatchLogs, initial chan<- string, foll
 		}
 
 		for _, e := range logEvents.Events {
-			follow <- *e.Message
+			follow <- formatMessage(e)
 		}
 
 		token = logEvents.NextForwardToken
 
 		time.Sleep(pollInterval)
 	}
+}
+
+func formatMessage(e *cloudwatchlogs.OutputLogEvent) string {
+	m := *e.Message
+
+	if len(m) > 16 {
+		if _, err := time.Parse("Jan  2 15:04:05 ", m[:16]); err == nil {
+			m = m[16:]
+		}
+	}
+
+	t := time.Unix(0, *e.Timestamp * 1000000)
+
+	return t.Format("2006-01-02 15:04:05 ") + m
 }
