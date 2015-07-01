@@ -20,7 +20,7 @@ const (
 	pollInterval  = time.Second * 5
 )
 
-func Run(config *aws.Config, filter []string) (err error) {
+func Run(config *aws.Config, filter []string, doFollow bool, limit int, startTime time.Time) (err error) {
 	logService := cloudwatchlogs.New(config)
 
 	instances, err := ec2.New(config).DescribeInstances(&ec2.DescribeInstancesInput{
@@ -30,9 +30,15 @@ func Run(config *aws.Config, filter []string) (err error) {
 		return
 	}
 
-	var count int
-	initial := make(chan string, 100)
-	follow := make(chan string, 100)
+	var (
+		initial = make(chan string, 100)
+		follow  chan string
+		count   int
+	)
+
+	if doFollow {
+		follow = make(chan string, 100)
+	}
 
 	for _, r := range instances.Reservations {
 		for _, i := range r.Instances {
@@ -60,7 +66,7 @@ func Run(config *aws.Config, filter []string) (err error) {
 				}
 			}
 
-			go load(logService, initial, follow, *i.InstanceID, *i.State.Code == 48)
+			go load(logService, initial, follow, limit, startTime, *i.InstanceID, *i.State.Code == 48)
 			count++
 		}
 	}
@@ -85,28 +91,42 @@ func Run(config *aws.Config, filter []string) (err error) {
 
 	sort.Strings(lines)
 
-	if len(lines) > logEventLimit {
-		lines = lines[len(lines)-logEventLimit:]
+	if len(lines) > limit {
+		if startTime.IsZero() {
+			lines = lines[len(lines)-limit:]
+		} else {
+			lines = lines[:limit]
+		}
 	}
 
 	for _, line := range lines {
 		fmt.Println(line)
 	}
 
-	for line := range follow {
-		fmt.Println(line)
+	if follow != nil {
+		for line := range follow {
+			fmt.Println(line)
+		}
 	}
 
 	return
 }
 
-func load(logService *cloudwatchlogs.CloudWatchLogs, initial chan<- string, follow chan<- string, instanceId string, terminated bool) {
-	logEvents, err := logService.GetLogEvents(&cloudwatchlogs.GetLogEventsInput{
-		EndTime:       pointer.Int64(time.Now().UnixNano() / int64(time.Millisecond)),
-		Limit:         pointer.Int64(logEventLimit),
+func load(logService *cloudwatchlogs.CloudWatchLogs, initial chan<- string, follow chan<- string, limit int, startTime time.Time, instanceId string, terminated bool) {
+	initialParams := &cloudwatchlogs.GetLogEventsInput{
+		Limit:         pointer.Int64(int64(limit)),
 		LogGroupName:  pointer.String(logGroupName),
 		LogStreamName: &instanceId,
-	})
+	}
+
+	if !startTime.IsZero() {
+		initialParams.StartFromHead = pointer.Bool(true)
+		initialParams.StartTime = pointer.Int64(startTime.UnixNano() / int64(time.Millisecond))
+	} else {
+		initialParams.EndTime = pointer.Int64(time.Now().UnixNano() / int64(time.Millisecond))
+	}
+
+	logEvents, err := logService.GetLogEvents(initialParams)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s: %v\n", instanceId, err)
 		initial <- ""
@@ -121,7 +141,7 @@ func load(logService *cloudwatchlogs.CloudWatchLogs, initial chan<- string, foll
 
 	initial <- ""
 
-	if terminated {
+	if follow == nil || terminated {
 		return
 	}
 
