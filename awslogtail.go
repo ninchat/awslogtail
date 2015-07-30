@@ -20,9 +20,12 @@ const (
 	pollInterval  = time.Second * 5
 )
 
-func Run(config *aws.Config, filter []string, doFollow bool, limit int, startTime time.Time) (err error) {
-	logService := cloudwatchlogs.New(config)
+type stream struct {
+	name string
+	live bool
+}
 
+func findEC2Instances(config *aws.Config, filter []string, output chan<- stream) (err error) {
 	instances, err := ec2.New(config).DescribeInstances(&ec2.DescribeInstancesInput{
 		MaxResults: pointer.Int64(1000),
 	})
@@ -30,7 +33,96 @@ func Run(config *aws.Config, filter []string, doFollow bool, limit int, startTim
 		return
 	}
 
+	go func() {
+		defer close(output)
+
+		for _, r := range instances.Reservations {
+			for _, i := range r.Instances {
+				if len(filter) > 0 {
+					var name string
+
+					for _, t := range i.Tags {
+						if *t.Key == "Name" {
+							name = *t.Value
+							break
+						}
+					}
+
+					var match bool
+
+					for _, s := range filter {
+						if strings.HasPrefix(name, s) {
+							match = true
+							break
+						}
+					}
+
+					if !match {
+						continue
+					}
+				}
+
+				output <- stream{
+					name: *i.InstanceID,
+					live: *i.State.Code != 48,
+				}
+			}
+		}
+	}()
+
+	return
+}
+
+func findLogStreamsSince(logService *cloudwatchlogs.CloudWatchLogs, startTime time.Time, endTime time.Time, output chan<- stream) {
 	var (
+		startTimestamp = startTime.UnixNano() / 1000000
+		endTimestamp   = endTime.UnixNano() / 1000000
+	)
+
+	go func() {
+		defer close(output)
+
+		var nextToken *string
+
+		for {
+			logStreams, err := logService.DescribeLogStreams(&cloudwatchlogs.DescribeLogStreamsInput{
+				Descending:   pointer.Bool(true),
+				LogGroupName: pointer.String(logGroupName),
+				NextToken:    nextToken,
+				OrderBy:      pointer.String("LastEventTime"),
+			})
+			if err != nil {
+				panic(err)
+			}
+
+			for _, logStream := range logStreams.LogStreams {
+				fmt.Fprintf(os.Stderr, "%s...%s %s\n", time.Unix(0, *logStream.FirstEventTimestamp * 1000000), time.Unix(0, *logStream.LastEventTimestamp * 1000000), *logStream.LogStreamName)
+
+				if endTimestamp > 0 && *logStream.FirstEventTimestamp > endTimestamp {
+					continue
+				}
+
+				if *logStream.LastEventTimestamp < startTimestamp {
+					return
+				}
+
+				output <- stream{
+					name: *logStream.LogStreamName,
+				}
+			}
+
+			nextToken = logStreams.NextToken
+		}
+	}()
+
+	return
+}
+
+func Run(config *aws.Config, filter []string, doFollow bool, limit int, startTime time.Time, endTime time.Time) (err error) {
+	logService := cloudwatchlogs.New(config)
+
+	var (
+		streams = make(chan stream, 10)
 		initial = make(chan string, 100)
 		follow  chan string
 		count   int
@@ -40,35 +132,17 @@ func Run(config *aws.Config, filter []string, doFollow bool, limit int, startTim
 		follow = make(chan string, 100)
 	}
 
-	for _, r := range instances.Reservations {
-		for _, i := range r.Instances {
-			if len(filter) > 0 {
-				var name string
-
-				for _, t := range i.Tags {
-					if *t.Key == "Name" {
-						name = *t.Value
-						break
-					}
-				}
-
-				var match bool
-
-				for _, s := range filter {
-					if strings.HasPrefix(name, s) {
-						match = true
-						break
-					}
-				}
-
-				if !match {
-					continue
-				}
-			}
-
-			go load(logService, initial, follow, limit, startTime, *i.InstanceID, *i.State.Code == 48)
-			count++
+	if startTime.IsZero() {
+		if err = findEC2Instances(config, filter, streams); err != nil {
+			return
 		}
+	} else {
+		findLogStreamsSince(logService, startTime, endTime, streams)
+	}
+
+	for s := range streams {
+		go load(logService, initial, follow, limit, startTime, endTime, s.name, !s.live)
+		count++
 	}
 
 	if count == 0 {
@@ -91,7 +165,7 @@ func Run(config *aws.Config, filter []string, doFollow bool, limit int, startTim
 
 	sort.Stable(byTimestamp(lines))
 
-	if len(lines) > limit {
+	if endTime.IsZero() && len(lines) > limit {
 		if startTime.IsZero() {
 			lines = lines[len(lines)-limit:]
 		} else {
@@ -112,18 +186,25 @@ func Run(config *aws.Config, filter []string, doFollow bool, limit int, startTim
 	return
 }
 
-func load(logService *cloudwatchlogs.CloudWatchLogs, initial chan<- string, follow chan<- string, limit int, startTime time.Time, instanceId string, terminated bool) {
+func load(logService *cloudwatchlogs.CloudWatchLogs, initial chan<- string, follow chan<- string, limit int, startTime time.Time, endTime time.Time, instanceId string, terminated bool) {
 	initialParams := &cloudwatchlogs.GetLogEventsInput{
-		Limit:         pointer.Int64(int64(limit)),
 		LogGroupName:  pointer.String(logGroupName),
 		LogStreamName: &instanceId,
 	}
 
-	if !startTime.IsZero() {
+	if endTime.IsZero() {
+		if !startTime.IsZero() {
+			initialParams.StartFromHead = pointer.Bool(true)
+			initialParams.StartTime = pointer.Int64(startTime.UnixNano() / int64(time.Millisecond))
+		} else {
+			initialParams.EndTime = pointer.Int64(time.Now().UnixNano() / int64(time.Millisecond))
+		}
+
+		initialParams.Limit = pointer.Int64(int64(limit))
+	} else {
 		initialParams.StartFromHead = pointer.Bool(true)
 		initialParams.StartTime = pointer.Int64(startTime.UnixNano() / int64(time.Millisecond))
-	} else {
-		initialParams.EndTime = pointer.Int64(time.Now().UnixNano() / int64(time.Millisecond))
+		initialParams.EndTime = pointer.Int64(endTime.UnixNano() / int64(time.Millisecond))
 	}
 
 	logEvents, err := logService.GetLogEvents(initialParams)
