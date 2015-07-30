@@ -89,7 +89,7 @@ func Run(config *aws.Config, filter []string, doFollow bool, limit int, startTim
 		}
 	}
 
-	sort.Strings(lines)
+	sort.Stable(byTimestamp(lines))
 
 	if len(lines) > limit {
 		if startTime.IsZero() {
@@ -181,4 +181,18 @@ func formatMessage(e *cloudwatchlogs.OutputLogEvent) string {
 	t := time.Unix(0, *e.Timestamp * 1000000)
 
 	return t.Format("2006-01-02 15:04:05 ") + m
+}
+
+type byTimestamp []string
+
+func (messages byTimestamp) Len() int {
+	return len(messages)
+}
+
+func (messages byTimestamp) Swap(i, j int) {
+	messages[i], messages[j] = messages[j], messages[i]
+}
+
+func (messages byTimestamp) Less(i, j int) bool {
+	return messages[i][:19] < messages[j][:19]
 }
