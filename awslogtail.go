@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/cloudwatchlogs"
 	"github.com/aws/aws-sdk-go/service/ec2"
 	"github.com/tsavola/pointer"
@@ -25,8 +25,8 @@ type stream struct {
 	live bool
 }
 
-func findEC2Instances(config *aws.Config, filter []string, output chan<- stream) (err error) {
-	instances, err := ec2.New(config).DescribeInstances(&ec2.DescribeInstancesInput{
+func findEC2Instances(sess *session.Session, filter []string, output chan<- stream) (err error) {
+	instances, err := ec2.New(sess).DescribeInstances(&ec2.DescribeInstancesInput{
 		MaxResults: pointer.Int64(1000),
 	})
 	if err != nil {
@@ -63,7 +63,7 @@ func findEC2Instances(config *aws.Config, filter []string, output chan<- stream)
 				}
 
 				output <- stream{
-					name: *i.InstanceID,
+					name: *i.InstanceId,
 					live: *i.State.Code != 48,
 				}
 			}
@@ -118,8 +118,8 @@ func findLogStreamsSince(logService *cloudwatchlogs.CloudWatchLogs, startTime ti
 	return
 }
 
-func Run(config *aws.Config, filter []string, doFollow bool, limit int, startTime time.Time, endTime time.Time) (err error) {
-	logService := cloudwatchlogs.New(config)
+func Run(sess *session.Session, filter []string, doFollow bool, limit int, startTime time.Time, endTime time.Time) (err error) {
+	logService := cloudwatchlogs.New(sess)
 
 	var (
 		streams = make(chan stream, 10)
@@ -133,7 +133,7 @@ func Run(config *aws.Config, filter []string, doFollow bool, limit int, startTim
 	}
 
 	if startTime.IsZero() {
-		if err = findEC2Instances(config, filter, streams); err != nil {
+		if err = findEC2Instances(sess, filter, streams); err != nil {
 			return
 		}
 	} else {

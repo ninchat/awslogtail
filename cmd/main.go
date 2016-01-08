@@ -7,23 +7,24 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/session"
 
 	awslogtail ".."
 )
 
 func main() {
-	config := &aws.Config{}
-
 	var (
+		region    = ""
 		follow    = false
 		limit     = 100
 		startStr  string
 		startTime time.Time
 		endStr    string
 		endTime   time.Time
+		config    aws.Config
 	)
 
-	flag.StringVar(&config.Region, "region", config.Region, "AWS region name")
+	flag.StringVar(&region, "region", region, "AWS region name")
 	flag.BoolVar(&follow, "f", follow, "output appended data as the logs grow (conflicts with -t and -T)")
 	flag.IntVar(&limit, "n", limit, "specify the number of lines to output (conflicts with -T)")
 	flag.StringVar(&startStr, "t", startStr, "load messages since YYYY-MM-DDTHH:MM:SS@TZ (conflicts with -f)")
@@ -38,7 +39,13 @@ func main() {
 		endTime = parseTime(endStr)
 	}
 
-	if err := awslogtail.Run(config, flag.Args(), follow, limit, startTime, endTime); err != nil {
+	if region != "" {
+		config.Region = &region
+	}
+
+	sess := session.New(&config)
+
+	if err := awslogtail.Run(sess, flag.Args(), follow, limit, startTime, endTime); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
