@@ -96,7 +96,7 @@ func findLogStreamsSince(logService *cloudwatchlogs.CloudWatchLogs, startTime ti
 			}
 
 			for _, logStream := range logStreams.LogStreams {
-				fmt.Fprintf(os.Stderr, "%s...%s %s\n", time.Unix(0, *logStream.FirstEventTimestamp * 1000000), time.Unix(0, *logStream.LastEventTimestamp * 1000000), *logStream.LogStreamName)
+				fmt.Fprintf(os.Stderr, "%s...%s %s\n", time.Unix(0, *logStream.FirstEventTimestamp*1000000), time.Unix(0, *logStream.LastEventTimestamp*1000000), *logStream.LogStreamName)
 
 				if endTimestamp > 0 && *logStream.FirstEventTimestamp > endTimestamp {
 					continue
@@ -259,7 +259,7 @@ func formatMessage(e *cloudwatchlogs.OutputLogEvent) string {
 		}
 	}
 
-	t := time.Unix(0, *e.Timestamp * 1000000)
+	t := time.Unix(0, *e.Timestamp*1000000)
 
 	return t.Format("2006-01-02 15:04:05 ") + m
 }
