@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/cloudwatchlogs"
 	"github.com/aws/aws-sdk-go/service/ec2"
-	"github.com/tsavola/pointer"
 )
 
 const (
@@ -27,7 +27,7 @@ type stream struct {
 
 func findEC2Instances(sess *session.Session, filter []string, output chan<- stream) (err error) {
 	instances, err := ec2.New(sess).DescribeInstances(&ec2.DescribeInstancesInput{
-		MaxResults: pointer.Int64(1000),
+		MaxResults: aws.Int64(1000),
 	})
 	if err != nil {
 		return
@@ -86,10 +86,10 @@ func findLogStreamsSince(logService *cloudwatchlogs.CloudWatchLogs, startTime ti
 
 		for {
 			logStreams, err := logService.DescribeLogStreams(&cloudwatchlogs.DescribeLogStreamsInput{
-				Descending:   pointer.Bool(true),
-				LogGroupName: pointer.String(logGroupName),
+				Descending:   aws.Bool(true),
+				LogGroupName: aws.String(logGroupName),
 				NextToken:    nextToken,
-				OrderBy:      pointer.String("LastEventTime"),
+				OrderBy:      aws.String("LastEventTime"),
 			})
 			if err != nil {
 				panic(err)
@@ -188,23 +188,23 @@ func Run(sess *session.Session, filter []string, doFollow bool, limit int, start
 
 func load(logService *cloudwatchlogs.CloudWatchLogs, initial chan<- string, follow chan<- string, limit int, startTime time.Time, endTime time.Time, instanceId string, terminated bool) {
 	initialParams := &cloudwatchlogs.GetLogEventsInput{
-		LogGroupName:  pointer.String(logGroupName),
+		LogGroupName:  aws.String(logGroupName),
 		LogStreamName: &instanceId,
 	}
 
 	if endTime.IsZero() {
 		if !startTime.IsZero() {
-			initialParams.StartFromHead = pointer.Bool(true)
-			initialParams.StartTime = pointer.Int64(startTime.UnixNano() / int64(time.Millisecond))
+			initialParams.StartFromHead = aws.Bool(true)
+			initialParams.StartTime = aws.Int64(startTime.UnixNano() / int64(time.Millisecond))
 		} else {
-			initialParams.EndTime = pointer.Int64(time.Now().UnixNano() / int64(time.Millisecond))
+			initialParams.EndTime = aws.Int64(time.Now().UnixNano() / int64(time.Millisecond))
 		}
 
-		initialParams.Limit = pointer.Int64(int64(limit))
+		initialParams.Limit = aws.Int64(int64(limit))
 	} else {
-		initialParams.StartFromHead = pointer.Bool(true)
-		initialParams.StartTime = pointer.Int64(startTime.UnixNano() / int64(time.Millisecond))
-		initialParams.EndTime = pointer.Int64(endTime.UnixNano() / int64(time.Millisecond))
+		initialParams.StartFromHead = aws.Bool(true)
+		initialParams.StartTime = aws.Int64(startTime.UnixNano() / int64(time.Millisecond))
+		initialParams.EndTime = aws.Int64(endTime.UnixNano() / int64(time.Millisecond))
 	}
 
 	logEvents, err := logService.GetLogEvents(initialParams)
@@ -230,10 +230,10 @@ func load(logService *cloudwatchlogs.CloudWatchLogs, initial chan<- string, foll
 
 	for {
 		logEvents, err := logService.GetLogEvents(&cloudwatchlogs.GetLogEventsInput{
-			LogGroupName:  pointer.String(logGroupName),
+			LogGroupName:  aws.String(logGroupName),
 			LogStreamName: &instanceId,
 			NextToken:     token,
-			StartFromHead: pointer.Bool(true),
+			StartFromHead: aws.Bool(true),
 		})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "%s: %v\n", instanceId, err)
