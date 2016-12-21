@@ -207,26 +207,47 @@ func load(logService *cloudwatchlogs.CloudWatchLogs, initial chan<- string, foll
 		initialParams.EndTime = aws.Int64(endTime.UnixNano() / int64(time.Millisecond))
 	}
 
-	logEvents, err := logService.GetLogEvents(initialParams)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s: %v\n", instanceId, err)
-		initial <- ""
-		return
-	}
+	var token *string
 
-	for _, e := range logEvents.Events {
-		if *e.Message != "" {
-			initial <- formatMessage(e)
+	shouldContinue := func(p *cloudwatchlogs.GetLogEventsOutput, lastPage bool) bool {
+		var end bool
+
+		if len(p.Events) == 0 {
+			end = true
+		}
+
+		for _, e := range p.Events {
+			if *e.Message == "" {
+				end = true
+			} else {
+				t, m := formatMessage(e)
+				if endTime.IsZero() || t.Before(endTime) {
+					initial <- m
+				} else {
+					end = true
+				}
+			}
+		}
+
+		token = p.NextForwardToken
+
+		if !startTime.IsZero() && !endTime.IsZero() {
+			return !end
+		} else {
+			return false
 		}
 	}
 
+	err := logService.GetLogEventsPages(initialParams, shouldContinue)
 	initial <- ""
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%s: %v\n", instanceId, err)
+		return
+	}
 
 	if follow == nil || terminated {
 		return
 	}
-
-	token := logEvents.NextForwardToken
 
 	for {
 		logEvents, err := logService.GetLogEvents(&cloudwatchlogs.GetLogEventsInput{
@@ -241,7 +262,8 @@ func load(logService *cloudwatchlogs.CloudWatchLogs, initial chan<- string, foll
 		}
 
 		for _, e := range logEvents.Events {
-			follow <- formatMessage(e)
+			_, m := formatMessage(e)
+			follow <- m
 		}
 
 		token = logEvents.NextForwardToken
@@ -250,8 +272,8 @@ func load(logService *cloudwatchlogs.CloudWatchLogs, initial chan<- string, foll
 	}
 }
 
-func formatMessage(e *cloudwatchlogs.OutputLogEvent) string {
-	m := *e.Message
+func formatMessage(e *cloudwatchlogs.OutputLogEvent) (t time.Time, m string) {
+	m = *e.Message
 
 	if len(m) > 16 {
 		if _, err := time.Parse("Jan  2 15:04:05 ", m[:16]); err == nil {
@@ -259,9 +281,9 @@ func formatMessage(e *cloudwatchlogs.OutputLogEvent) string {
 		}
 	}
 
-	t := time.Unix(0, *e.Timestamp*1000000)
-
-	return t.Format("2006-01-02 15:04:05 ") + m
+	t = time.Unix(0, *e.Timestamp*1000000)
+	m = t.Format("2006-01-02 15:04:05 ") + m
+	return
 }
 
 type byTimestamp []string
