@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
 
 	awslogtail ".."
@@ -15,6 +16,7 @@ import (
 func main() {
 	var (
 		region    = ""
+		profile   = ""
 		follow    = false
 		limit     = 100
 		startStr  string
@@ -25,6 +27,7 @@ func main() {
 	)
 
 	flag.StringVar(&region, "region", region, "AWS region name")
+	flag.StringVar(&profile, "profile", profile, "AWS config profile")
 	flag.BoolVar(&follow, "f", follow, "output appended data as the logs grow (conflicts with -t and -T)")
 	flag.IntVar(&limit, "n", limit, "specify the number of lines to output (conflicts with -T)")
 	flag.StringVar(&startStr, "t", startStr, "load messages since YYYY-MM-DDTHH:MM:SS@TZ (conflicts with -f)")
@@ -41,6 +44,10 @@ func main() {
 
 	if region != "" {
 		config.Region = &region
+	}
+
+	if profile != "" {
+		config.Credentials = credentials.NewSharedCredentials("", profile)
 	}
 
 	sess := session.New(&config)
