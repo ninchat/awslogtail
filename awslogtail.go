@@ -1,4 +1,4 @@
-package awslogtail
+package main
 
 import (
 	"errors"

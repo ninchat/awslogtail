@@ -9,8 +9,6 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
-
-	awslogtail ".."
 )
 
 func main() {
@@ -52,7 +50,7 @@ func main() {
 
 	sess := session.New(&config)
 
-	if err := awslogtail.Run(sess, flag.Args(), follow, limit, startTime, endTime); err != nil {
+	if err := Run(sess, flag.Args(), follow, limit, startTime, endTime); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
