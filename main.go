@@ -15,6 +15,7 @@ func main() {
 	var (
 		region    = ""
 		profile   = ""
+		logGroup  = "/var/log/messages"
 		follow    = false
 		limit     = 100
 		startStr  string
@@ -26,6 +27,7 @@ func main() {
 
 	flag.StringVar(&region, "region", region, "AWS region name")
 	flag.StringVar(&profile, "profile", profile, "AWS config profile")
+	flag.StringVar(&logGroup, "group", logGroup, "log group name")
 	flag.BoolVar(&follow, "f", follow, "output appended data as the logs grow (conflicts with -t and -T)")
 	flag.IntVar(&limit, "n", limit, "specify the number of lines to output (conflicts with -T)")
 	flag.StringVar(&startStr, "t", startStr, "load messages since YYYY-MM-DDTHH:MM:SS@TZ (conflicts with -f)")
@@ -50,7 +52,7 @@ func main() {
 
 	sess := session.New(&config)
 
-	if err := Run(sess, flag.Args(), follow, limit, startTime, endTime); err != nil {
+	if err := Run(sess, logGroup, flag.Args(), follow, limit, startTime, endTime); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

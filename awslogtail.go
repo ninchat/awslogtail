@@ -16,7 +16,6 @@ import (
 
 const (
 	logEventLimit = 100
-	logGroupName  = "/var/log/messages"
 	pollInterval  = time.Second * 5
 )
 
@@ -73,7 +72,7 @@ func findEC2Instances(sess *session.Session, filter []string, output chan<- stre
 	return
 }
 
-func findLogStreamsSince(logService *cloudwatchlogs.CloudWatchLogs, startTime time.Time, endTime time.Time, output chan<- stream) {
+func findLogStreamsSince(logService *cloudwatchlogs.CloudWatchLogs, logGroup string, startTime, endTime time.Time, output chan<- stream) {
 	var (
 		startTimestamp = startTime.UnixNano() / 1000000
 		endTimestamp   = endTime.UnixNano() / 1000000
@@ -87,7 +86,7 @@ func findLogStreamsSince(logService *cloudwatchlogs.CloudWatchLogs, startTime ti
 		for {
 			logStreams, err := logService.DescribeLogStreams(&cloudwatchlogs.DescribeLogStreamsInput{
 				Descending:   aws.Bool(true),
-				LogGroupName: aws.String(logGroupName),
+				LogGroupName: &logGroup,
 				NextToken:    nextToken,
 				OrderBy:      aws.String("LastEventTime"),
 			})
@@ -118,7 +117,7 @@ func findLogStreamsSince(logService *cloudwatchlogs.CloudWatchLogs, startTime ti
 	return
 }
 
-func Run(sess *session.Session, filter []string, doFollow bool, limit int, startTime time.Time, endTime time.Time) (err error) {
+func Run(sess *session.Session, logGroup string, filter []string, doFollow bool, limit int, startTime, endTime time.Time) (err error) {
 	logService := cloudwatchlogs.New(sess)
 
 	var (
@@ -137,11 +136,11 @@ func Run(sess *session.Session, filter []string, doFollow bool, limit int, start
 			return
 		}
 	} else {
-		findLogStreamsSince(logService, startTime, endTime, streams)
+		findLogStreamsSince(logService, logGroup, startTime, endTime, streams)
 	}
 
 	for s := range streams {
-		go load(logService, initial, follow, limit, startTime, endTime, s.name, !s.live)
+		go load(logService, initial, follow, logGroup, limit, startTime, endTime, s.name, !s.live)
 		count++
 	}
 
@@ -186,9 +185,9 @@ func Run(sess *session.Session, filter []string, doFollow bool, limit int, start
 	return
 }
 
-func load(logService *cloudwatchlogs.CloudWatchLogs, initial chan<- string, follow chan<- string, limit int, startTime time.Time, endTime time.Time, instanceId string, terminated bool) {
+func load(logService *cloudwatchlogs.CloudWatchLogs, initial chan<- string, follow chan<- string, logGroup string, limit int, startTime, endTime time.Time, instanceId string, terminated bool) {
 	initialParams := &cloudwatchlogs.GetLogEventsInput{
-		LogGroupName:  aws.String(logGroupName),
+		LogGroupName:  &logGroup,
 		LogStreamName: &instanceId,
 	}
 
@@ -251,7 +250,7 @@ func load(logService *cloudwatchlogs.CloudWatchLogs, initial chan<- string, foll
 
 	for {
 		logEvents, err := logService.GetLogEvents(&cloudwatchlogs.GetLogEventsInput{
-			LogGroupName:  aws.String(logGroupName),
+			LogGroupName:  &logGroup,
 			LogStreamName: &instanceId,
 			NextToken:     token,
 			StartFromHead: aws.Bool(true),
